@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "../parser.h"
+#include "../mes/parser.h"
 
 #define BUF_SIZE 20000
 #define JSX_START_CHUNK "_jsx("
