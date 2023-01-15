@@ -1,0 +1,4 @@
+# source it
+
+export MES_LIB_PATH=
+export LD_LIBRARY_PATH=$MES_LIB_PATH:$LD_LIBRARY_PATH
