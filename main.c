@@ -49,8 +49,49 @@ static char *get_input(void) {
 	return buf;
 }
 
+static char *compose_string_from_chunks(const char **chunks) {
+	char *output = NULL;
+	long output_length = 0;
+	const char **chunk_pointer = chunks;
+	const char *chunk;
+	long chunk_length = 0;
+	char *output_realloc;
+	long output_size_to_alloc;
+
+	while((chunk = *chunk_pointer)) {
+		chunk_length = strlen(chunk);
+
+		/* chunk + \0 */
+		output_size_to_alloc = chunk_length + 1;
+
+		if(output) {
+			output_size_to_alloc += output_length;
+			output_realloc = realloc(output, output_size_to_alloc);
+
+			if(output_realloc) {
+				output = output_realloc;
+			} else {
+				fprintf(stderr, "Failed to realloc.\n");
+				exit(1);
+			}
+		} else {
+			output = malloc(chunk_length);
+		}
+
+		strcpy(output + output_length, chunk);
+		output_length += chunk_length;
+		chunk_pointer++;
+	}
+
+	if(!chunks) {
+		return NULL;
+	}
+
+	return output;
+}
+
 static char *transpile_node(const Node *node) {
-	char *output = "";
+	char *output = NULL;
 	long output_length;
 
 	if(!node) {
@@ -63,21 +104,11 @@ static char *transpile_node(const Node *node) {
 		return transpile_nodes((const Node **)node->children);
 	} else if(node->type == jsx_element_node) {
 		char *opening_element_transpiled;
-		long opening_element_transpiled_length;
 		char *children_transpiled;
-		long children_transpiled_length = 0;
-		const char *start_chunk = JSX_START_CHUNK;
-		long start_chunk_length = JSX_START_CHUNK_LENGTH;
+		char *chunks[7];
 
 		opening_element_transpiled = transpile_node(node->opening_element);
-		opening_element_transpiled_length = strlen(opening_element_transpiled);
 
-		if(node->children) {
-			children_transpiled = transpile_nodes_csv(
-				(const Node **)node->children
-			);
-			children_transpiled_length = strlen(children_transpiled);
-		}
 		if(!node->opening_element->is_self_closing) {
 			if(node->opening_element->child) {
 				/* if(!node->closing_element->child ||
@@ -100,66 +131,33 @@ static char *transpile_node(const Node *node) {
 			}
 		}
 
-		if(children_transpiled_length) {
-			start_chunk = JSXS_START_CHUNK;
-			start_chunk_length = JSXS_START_CHUNK_LENGTH;
-		}
-		/* start_macro + opening_element + arg_macro + end_macro + \0 */
-		output_length = start_chunk_length +
-			opening_element_transpiled_length +
-			JSX_ARGUMENT_START_CHUNK_LENGTH +
-			JSX_END_CHUNK_LENGTH + 1;
-		if(children_transpiled_length) {
-			output_length += children_transpiled_length +
-				CHILDREN_CHUNK_START_LENGTH +
-				CHILDREN_CHUNK_END_LENGTH;
-		}
-		output = malloc(output_length);
-		strcpy(output, start_chunk);
-		strcpy(output + start_chunk_length, opening_element_transpiled);
-		free(opening_element_transpiled);
-		strcpy(
-			output +
-			start_chunk_length +
-			opening_element_transpiled_length,
-			JSX_ARGUMENT_START_CHUNK
-		);
-		if(children_transpiled_length) {
-			strcpy(
-				output +
-				start_chunk_length +
-				opening_element_transpiled_length +
-				JSX_ARGUMENT_START_CHUNK_LENGTH,
-				CHILDREN_CHUNK_START
-			);
-			strcpy(
-				output +
-				start_chunk_length +
-				opening_element_transpiled_length +
-				JSX_ARGUMENT_START_CHUNK_LENGTH +
-				CHILDREN_CHUNK_START_LENGTH,
-				children_transpiled
-			);
-			strcpy(
-				output +
-				start_chunk_length +
-				opening_element_transpiled_length +
-				JSX_ARGUMENT_START_CHUNK_LENGTH +
-				CHILDREN_CHUNK_START_LENGTH +
-				children_transpiled_length,
-				CHILDREN_CHUNK_END
-				JSX_END_CHUNK
-			);
+		chunks[0] = JSX_START_CHUNK;
+		chunks[1] = opening_element_transpiled;
+		chunks[2] = JSX_ARGUMENT_START_CHUNK;
 
-			free(children_transpiled);
-		} else {
-			strcpy(
-				output +
-				start_chunk_length +
-				opening_element_transpiled_length +
-				JSX_ARGUMENT_START_CHUNK_LENGTH,
-				JSX_END_CHUNK
+		if(node->children) {
+			children_transpiled = transpile_nodes_csv(
+				(const Node **)node->children
 			);
+		}
+
+		if(children_transpiled) {
+			chunks[0] = JSXS_START_CHUNK;
+			chunks[3] = CHILDREN_CHUNK_START;
+			chunks[4] = children_transpiled;
+			chunks[5] = CHILDREN_CHUNK_END JSX_END_CHUNK;
+			chunks[6] = NULL;
+		} else {
+			chunks[3] = JSX_END_CHUNK;
+			chunks[4] = NULL;
+		}
+
+		output = compose_string_from_chunks((const char **)chunks);
+		free(opening_element_transpiled);
+		/* TODO: remove strlen when we stop returning empty string
+			as a fallback */
+		if(children_transpiled && strlen(children_transpiled)) {
+			free(children_transpiled);
 		}
 	} else if(node->type == jsx_opening_element_node) {
 		if(node->child) {
@@ -168,13 +166,12 @@ static char *transpile_node(const Node *node) {
 				exit(1);
 			} */
 
-			/* " + element_name + " + \0 */
-			output_length = 3 + strlen(node->child->value);
-			output = malloc(output_length);
-
 			/* JSX elements starting with a lowercase letter are considered
 			   intrinsic. */
 			if(node->child->value[0] >= 'a' && node->child->value[0] <= 'z') {
+				/* " + element_name + " + \0 */
+				output_length = 3 + strlen(node->child->value);
+				output = malloc(output_length);
 				output[0] = '"';
 				strcpy(output + 1, node->child->value);
 				output[output_length - 2] = '"';
@@ -186,10 +183,15 @@ static char *transpile_node(const Node *node) {
 			output = FRAGMENT_FUNC;
 		}
 	} else if(node->type == jsx_expression_node) {
+		return "";
 		/* transpile_nodes((const Node **)node->children); */
-	} /* else {
-		return NULL;
-	} */
+	} else if(node->type == jsx_text_node) {
+		return "";
+		/* transpile_nodes((const Node **)node->children); */
+	} else {
+		fprintf(stderr, "Unexpected node type.\n");
+		exit(1);
+	}
 
 	return output;
 }
@@ -201,9 +203,11 @@ static char *transpile_nodes_base(
 	const Node **p = nodes;
 	const Node *node;
 	char *node_transpiled;
-	long output_length = 0;
 	long node_transpiled_length;
 	char *output = NULL;
+	long output_length = 0;
+	char *output_realloc;
+	long output_to_malloc_size = 0;
 
 	if(!p) {
 		return NULL;
@@ -211,43 +215,49 @@ static char *transpile_nodes_base(
 
 	while((node = *p)) {
 		node_transpiled = transpile_node(node);
+
+		if(!node_transpiled) {
+			fprintf(stderr, "Couldn't transpile node.\n");
+		}
+
 		node_transpiled_length = strlen(node_transpiled);
-		if(node_transpiled_length && should_comma_separate) {
-			node_transpiled_length++;
+		/* TODO: remove when we stop returning empty string */
+		if(!node_transpiled_length) {
+			p++;
+			continue;
 		}
 
-		if(node_transpiled_length) {
-			if(output) {
-				output = realloc(
-					output,
-					output_length +
-					node_transpiled_length
-				);
+		/* node + \0 */
+		output_to_malloc_size = node_transpiled_length + 1;
+
+		if(should_comma_separate) {
+			output_to_malloc_size++;
+		}
+
+		if(output) {
+			output_to_malloc_size += output_length;
+			output_realloc = realloc(output, output_to_malloc_size);
+
+			if(output_realloc) {
+				output = output_realloc;
 			} else {
-				output = malloc(node_transpiled_length);
+				fprintf(stderr, "Failed to realloc.\n");
 			}
-
-			strcpy(output + output_length, node_transpiled);
+		} else {
+			output = malloc(output_to_malloc_size);
 		}
 
-		if(node_transpiled_length && should_comma_separate) {
-			strcpy(
-				output +
-				output_length +
-				node_transpiled_length - 1,
-				","
-			);
+		strcpy(output + output_length, node_transpiled);
+
+		if(should_comma_separate) {
+			output[output_to_malloc_size - 2] = ',';
+			output[output_to_malloc_size - 1] = '\0';
+			output_length++;
 		}
 
 		output_length += node_transpiled_length;
 		p++;
 	}
-
-	if(!output) {
-		return "";
-	}
-
-	output[output_length] = '\0';
 
 	return output;
 }
