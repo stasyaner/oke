@@ -51,7 +51,7 @@ static char *get_input(void) {
 
 static char *compose_string_from_chunks(const char **chunks) {
 	char *output = NULL;
-	long output_length = 0;
+	long cursor = 0;
 	const char **chunk_pointer = chunks;
 	const char *chunk;
 	long chunk_length = 0;
@@ -61,11 +61,9 @@ static char *compose_string_from_chunks(const char **chunks) {
 	while((chunk = *chunk_pointer)) {
 		chunk_length = strlen(chunk);
 
-		/* chunk + \0 */
-		output_size_to_alloc = chunk_length + 1;
-
 		if(output) {
-			output_size_to_alloc += output_length;
+			/* cursor + chunk + \0 */
+			output_size_to_alloc = cursor + chunk_length + 1;
 			output_realloc = realloc(output, output_size_to_alloc);
 
 			if(output_realloc) {
@@ -78,10 +76,12 @@ static char *compose_string_from_chunks(const char **chunks) {
 			output = malloc(chunk_length);
 		}
 
-		strcpy(output + output_length, chunk);
-		output_length += chunk_length;
+		memcpy(output + cursor, chunk, chunk_length);
+		cursor += chunk_length;
 		chunk_pointer++;
 	}
+
+	output[cursor] = '\0';
 
 	if(!chunks) {
 		return NULL;
@@ -205,7 +205,7 @@ static char *transpile_nodes_base(
 	char *node_transpiled;
 	long node_transpiled_length;
 	char *output = NULL;
-	long output_length = 0;
+	long cursor = 0;
 	char *output_realloc;
 	long output_to_malloc_size = 0;
 
@@ -227,15 +227,14 @@ static char *transpile_nodes_base(
 			continue;
 		}
 
-		/* node + \0 */
-		output_to_malloc_size = node_transpiled_length + 1;
-
+		output_to_malloc_size = node_transpiled_length;
 		if(should_comma_separate) {
 			output_to_malloc_size++;
 		}
 
 		if(output) {
-			output_to_malloc_size += output_length;
+			/* node + cursor + \0 */
+			output_to_malloc_size += cursor + 1;
 			output_realloc = realloc(output, output_to_malloc_size);
 
 			if(output_realloc) {
@@ -247,16 +246,17 @@ static char *transpile_nodes_base(
 			output = malloc(output_to_malloc_size);
 		}
 
-		strcpy(output + output_length, node_transpiled);
-
+		memcpy(output + cursor, node_transpiled, node_transpiled_length);
+		cursor += node_transpiled_length;
 		if(should_comma_separate) {
-			output[output_to_malloc_size - 2] = ',';
-			output[output_to_malloc_size - 1] = '\0';
-			output_length++;
+			output[cursor] = ',';
+			cursor++;
 		}
-
-		output_length += node_transpiled_length;
 		p++;
+	}
+
+	if (output) {
+		output[cursor] = '\0';
 	}
 
 	return output;
