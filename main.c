@@ -300,43 +300,53 @@ static char **transpile_nodes2(const Node **nodes) {
 	return output;
 }
 
-static char *do_nodes(
-	char *input,
-	Node **nodes,
-	char **compiled_ast
-) {
+static char *do_nodes(char *input, Node **nodes, char **compiled_ast) {
 	Node **node_pointer = nodes;
 	char **node_compiled_pointer = compiled_ast;
-	long shift = 0;
 	long input_length = strlen(input);
 	char *output = NULL;
-	long output_length = 0;
+	char *output_realloc = NULL;
+	long cursor = 0;
 	long prev_node_end = 0;
-	long allocated_size = 0;
+	long size_to_alloc = 0;
+	long space_between_nodes_length = 0;
 	Node *node;
 
 	while((node = *node_pointer)) {
-		long node_length = node->end - node->start;
 		long node_compiled_length = strlen(*node_compiled_pointer);
-		long node_start_shifted = node->start - shift;
+		space_between_nodes_length = node->start - prev_node_end;
 
+		size_to_alloc = cursor +
+			space_between_nodes_length +
+			node_compiled_length;
 		if(output) {
-			allocated_size = input_length - node_length + node_compiled_length;
-			if(output_length > allocated_size) {
-				output = realloc(output, allocated_size);
+			output_realloc = realloc(output, size_to_alloc);
+
+			if(output_realloc) {
+				output = output_realloc;
+			} else {
+				fprintf(stderr, "Failed to realloc.");
+				exit(1);
 			}
 		} else {
-			allocated_size = input_length;
-			output = malloc(allocated_size);
+			output = malloc(size_to_alloc);
 		}
 
-		strcpy(output + output_length, input + prev_node_end);
-		strcpy(output + node_start_shifted, *node_compiled_pointer);
-		/* strcpy(output + node_compiled_length, input + node->end); */
+		memcpy(
+			output + cursor,
+			input + prev_node_end,
+			space_between_nodes_length
+		);
+		cursor += space_between_nodes_length;
+
+		memcpy(
+			output + cursor,
+			*node_compiled_pointer,
+			node_compiled_length
+		);
+		cursor += node_compiled_length;
 
 		prev_node_end = node->end;
-		shift = node_length - node_compiled_length;
-		output_length = strlen(output);
 
 		free(node);
 		free(*node_compiled_pointer);
@@ -345,7 +355,28 @@ static char *do_nodes(
 		node_compiled_pointer++;
 	}
 
-	strcpy(output + output_length, input + prev_node_end);
+	if(output) {
+		space_between_nodes_length = input_length - prev_node_end;
+		/* + \0 */
+		size_to_alloc = cursor + space_between_nodes_length + 1;
+		output_realloc = realloc(output, size_to_alloc);
+		if(output_realloc) {
+			output = output_realloc;
+		} else {
+			fprintf(stderr, "Failed to realloc.");
+			exit(1);
+		}
+		memcpy(
+			output + cursor,
+			input + prev_node_end,
+			space_between_nodes_length
+		);
+		cursor += space_between_nodes_length;
+		output[cursor] = '\0';
+	}
+
+	free(nodes);
+	free(compiled_ast);
 
 	return output;
 }
@@ -369,7 +400,7 @@ int main() {
 		output2
 	);
 	/* printf("%ld\n", array_length((const void **)ast->child->children)); */
-	printf("%s\n", output);
+	printf("%s", output);
 	/* print_ast(ast); */
 
 	return 0;
