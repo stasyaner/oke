@@ -262,7 +262,7 @@ static char *transpile_nodes_base(
 	return output;
 }
 
-/* Count length of a NULL terinated array of pointers */
+/* Count length of a NULL terminated array of pointers */
 static long array_length(const void **array_pointer) {
 	long i = 0;
 	const void **p = array_pointer;
