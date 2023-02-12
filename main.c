@@ -16,7 +16,8 @@
 #define CHILDREN_CHUNK_END_LENGTH 2
 #define JSX_END_CHUNK "})"
 #define JSX_END_CHUNK_LENGTH 2
-#define FRAGMENT_FUNC "_Fragment"
+#define FRAGMENT_CHUNK "_Fragment"
+#define FRAGMENT_CHUNK_LENGTH 9
 
 #define transpile_nodes(nodes) transpile_nodes_base(nodes, 0)
 #define transpile_nodes_csv(nodes) transpile_nodes_base(nodes, 1)
@@ -180,7 +181,9 @@ static char *transpile_node(const Node *node) {
 				output = node->child->value;
 			}
 		} else {
-			output = FRAGMENT_FUNC;
+			/* fragment_function + \0 */
+			output = malloc(FRAGMENT_CHUNK_LENGTH + 1);
+			strcpy(output, FRAGMENT_CHUNK);
 		}
 	} else if(node->type == jsx_expression_node) {
 		return "";
