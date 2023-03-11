@@ -189,8 +189,15 @@ static char *transpile_node(const Node *node) {
 		return "";
 		/* transpile_nodes((const Node **)node->children); */
 	} else if(node->type == jsx_text_node) {
-		return "";
-		/* transpile_nodes((const Node **)node->children); */
+		long node_length = node->end - node->start;
+		/* node->raw could be of use here, not to mess around with quotes */
+		/* " + text + " + \0 */
+		output_length = 3 + node_length;
+		output = malloc(output_length);
+		output[0] = '"';
+		memcpy(output + 1, node->value, node_length);
+		output[output_length - 2] = '"';
+		output[output_length - 1] = '\0';
 	} else {
 		fprintf(stderr, "Unexpected node type.\n");
 		exit(1);
