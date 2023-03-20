@@ -10,10 +10,14 @@
 #define JSXS_START_CHUNK_LENGTH 6
 #define JSX_ARGUMENT_START_CHUNK ",{"
 #define JSX_ARGUMENT_START_CHUNK_LENGTH 2
-#define CHILDREN_CHUNK_START "children:["
-#define CHILDREN_CHUNK_START_LENGTH 10
-#define CHILDREN_CHUNK_END "],"
-#define CHILDREN_CHUNK_END_LENGTH 2
+#define CHILDREN_CHUNK_START "children:"
+#define CHILDREN_CHUNK_START_LENGTH 9
+#define CHILDREN_ARRAY_CHUNK_START "children:["
+#define CHILDREN_ARRAY_CHUNK_START_LENGTH 10
+#define CHILDREN_CHUNK_END ","
+#define CHILDREN_CHUNK_END_LENGTH 1
+#define CHILDREN_ARRAY_CHUNK_END "],"
+#define CHILDREN_ARRAY_CHUNK_END_LENGTH 2
 #define JSX_END_CHUNK "})"
 #define JSX_END_CHUNK_LENGTH 2
 #define FRAGMENT_CHUNK "_Fragment"
@@ -25,6 +29,8 @@ static char *transpile_nodes_base(
 	const Node **nodes,
 	char should_comma_separate
 );
+
+static long array_length(const void **array_pointer);
 
 static char *get_input(void) {
 	char *buf = NULL;
@@ -105,7 +111,8 @@ static char *transpile_node(const Node *node) {
 		return transpile_nodes((const Node **)node->children);
 	} else if(node->type == jsx_element_node) {
 		char *opening_element_transpiled;
-		char *children_transpiled;
+		char *children_transpiled = NULL;
+		char is_children_array = 1;
 		char *chunks[7];
 
 		opening_element_transpiled = transpile_node(node->opening_element);
@@ -137,16 +144,30 @@ static char *transpile_node(const Node *node) {
 		chunks[2] = JSX_ARGUMENT_START_CHUNK;
 
 		if(node->children) {
-			children_transpiled = transpile_nodes_csv(
-				(const Node **)node->children
-			);
+			long children_count = array_length((const void **)node->children);
+			if(
+				children_count == 1 &&
+				(*node->children)->type == jsx_text_node
+			) {
+				is_children_array = 0;
+				children_transpiled = transpile_node(*node->children);
+			} else {
+				children_transpiled = transpile_nodes_csv(
+					(const Node **)node->children
+				);
+			}
 		}
 
 		if(children_transpiled) {
-			chunks[0] = JSXS_START_CHUNK;
-			chunks[3] = CHILDREN_CHUNK_START;
 			chunks[4] = children_transpiled;
-			chunks[5] = CHILDREN_CHUNK_END JSX_END_CHUNK;
+			if(is_children_array) {
+				chunks[0] = JSXS_START_CHUNK;
+				chunks[3] = CHILDREN_ARRAY_CHUNK_START;
+				chunks[5] = CHILDREN_ARRAY_CHUNK_END JSX_END_CHUNK;
+			} else {
+				chunks[3] = CHILDREN_CHUNK_START;
+				chunks[5] = CHILDREN_CHUNK_END JSX_END_CHUNK;
+			}
 			chunks[6] = NULL;
 		} else {
 			chunks[3] = JSX_END_CHUNK;
@@ -186,8 +207,9 @@ static char *transpile_node(const Node *node) {
 			strcpy(output, FRAGMENT_CHUNK);
 		}
 	} else if(node->type == jsx_expression_node) {
-		return "";
-		/* transpile_nodes((const Node **)node->children); */
+		output = transpile_nodes((const Node **)node->children);
+	} else if(node->type == jsx_expression_text_node) {
+		output = node->value;
 	} else if(node->type == jsx_text_node) {
 		long node_length = node->end - node->start;
 		/* node->raw could be of use here, not to mess around with quotes */
