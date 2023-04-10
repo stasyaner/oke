@@ -145,10 +145,7 @@ static char *transpile_node(const Node *node) {
 
 		if(node->children) {
 			long children_count = array_length((const void **)node->children);
-			if(
-				children_count == 1 &&
-				(*node->children)->type == jsx_text_node
-			) {
+			if(children_count == 1) {
 				is_children_array = 0;
 				children_transpiled = transpile_node(*node->children);
 			} else {
