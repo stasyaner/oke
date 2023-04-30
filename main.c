@@ -20,8 +20,10 @@
 #define CHILDREN_ARRAY_CHUNK_END_LENGTH 2
 #define JSX_END_CHUNK "})"
 #define JSX_END_CHUNK_LENGTH 2
-#define FRAGMENT_CHUNK "_Fragment"
-#define FRAGMENT_CHUNK_LENGTH 9
+#define FRAGMENT_CHUNK "_Fragment,{"
+#define FRAGMENT_CHUNK_LENGTH 11
+#define TRUE_CHUNK "true"
+#define TRUE_CHUNK_LENGTH 4
 
 #define transpile_nodes(nodes) transpile_nodes_base(nodes, 0)
 #define transpile_nodes_csv(nodes) transpile_nodes_base(nodes, 1)
@@ -97,6 +99,12 @@ static char *compose_string_from_chunks(const char **chunks) {
 	return output;
 }
 
+static char is_intrinsic(char *element_name) {
+	/* JSX elements starting with a lowercase letter are considered
+	   intrinsic. */
+	return element_name[0] >= 'a' && element_name[0] <= 'z';
+}
+
 static char *transpile_node(const Node *node) {
 	char *output = NULL;
 	long output_length;
@@ -106,9 +114,9 @@ static char *transpile_node(const Node *node) {
 	}
 
 	if(node->type == file_node) {
-		return transpile_node(node->child);
+		output = transpile_node(node->child);
 	} else if(node->type == statement_list_node) {
-		return transpile_nodes((const Node **)node->children);
+		output = transpile_nodes((const Node **)node->children);
 	} else if(node->type == jsx_element_node) {
 		char *opening_element_transpiled;
 		char *children_transpiled = NULL;
@@ -141,7 +149,6 @@ static char *transpile_node(const Node *node) {
 
 		chunks[0] = JSX_START_CHUNK;
 		chunks[1] = opening_element_transpiled;
-		chunks[2] = JSX_ARGUMENT_START_CHUNK;
 
 		if(node->children) {
 			long children_count = array_length((const void **)node->children);
@@ -156,19 +163,19 @@ static char *transpile_node(const Node *node) {
 		}
 
 		if(children_transpiled) {
-			chunks[4] = children_transpiled;
+			chunks[3] = children_transpiled;
 			if(is_children_array) {
 				chunks[0] = JSXS_START_CHUNK;
-				chunks[3] = CHILDREN_ARRAY_CHUNK_START;
-				chunks[5] = CHILDREN_ARRAY_CHUNK_END JSX_END_CHUNK;
+				chunks[2] = CHILDREN_ARRAY_CHUNK_START;
+				chunks[4] = CHILDREN_ARRAY_CHUNK_END JSX_END_CHUNK;
 			} else {
-				chunks[3] = CHILDREN_CHUNK_START;
-				chunks[5] = CHILDREN_CHUNK_END JSX_END_CHUNK;
+				chunks[2] = CHILDREN_CHUNK_START;
+				chunks[4] = CHILDREN_CHUNK_END JSX_END_CHUNK;
 			}
-			chunks[6] = NULL;
+			chunks[5] = NULL;
 		} else {
-			chunks[3] = JSX_END_CHUNK;
-			chunks[4] = NULL;
+			chunks[2] = JSX_END_CHUNK;
+			chunks[3] = NULL;
 		}
 
 		output = compose_string_from_chunks((const char **)chunks);
@@ -184,31 +191,51 @@ static char *transpile_node(const Node *node) {
 				fprintf(stderr, "Identifier expected.");
 				exit(1);
 			} */
+			char *element_name = transpile_node(node->child);
+			long element_name_length = node->child->end - node->child->start;
+			char *atrributes_transpiled;
+			const char *chunks[4];
 
-			/* JSX elements starting with a lowercase letter are considered
-			   intrinsic. */
-			if(node->child->value[0] >= 'a' && node->child->value[0] <= 'z') {
+			if(is_intrinsic(element_name)) {
 				/* " + element_name + " + \0 */
-				output_length = 3 + strlen(node->child->value);
-				output = malloc(output_length);
-				output[0] = '"';
-				strcpy(output + 1, node->child->value);
-				output[output_length - 2] = '"';
-				output[output_length - 1] = '\0';
-			} else {
-				output = node->child->value;
+				char *element_name_enclosed = malloc(element_name_length + 3);
+				element_name_enclosed[0] = '"';
+				memcpy(
+					element_name_enclosed + 1,
+					element_name,
+					element_name_length
+				);
+				element_name_enclosed[element_name_length + 1] = '"';
+				element_name_enclosed[element_name_length + 2] = '\0';
+				free(element_name);
+				element_name = element_name_enclosed;
 			}
+
+			chunks[0] = element_name;
+			chunks[1] = JSX_ARGUMENT_START_CHUNK;
+
+			if(node->children) {
+				atrributes_transpiled =
+					transpile_nodes_csv((const Node **)node->children);
+				chunks[2] = atrributes_transpiled;
+				chunks[3] = NULL;
+			} else {
+				chunks[2] = NULL;
+			}
+
+			output = compose_string_from_chunks(chunks);
 		} else {
 			/* fragment_function + \0 */
 			output = malloc(FRAGMENT_CHUNK_LENGTH + 1);
 			strcpy(output, FRAGMENT_CHUNK);
 		}
-	} else if(node->type == jsx_expression_node) {
-		output = transpile_nodes((const Node **)node->children);
-	} else if(node->type == jsx_expression_text_node) {
-		output = node->value;
-	} else if(node->type == jsx_text_node) {
-		long node_length = node->end - node->start;
+	} else if(
+		node->type == jsx_text_node ||
+		node->type == string_literal_node
+	) {
+		/* we need strlen here as node length (node->end - node->start)
+		   doesn't represent the real length of the string in node->value */
+		long node_length = strlen(node->value);
 		/* node->raw could be of use here, not to mess around with quotes */
 		/* " + text + " + \0 */
 		output_length = 3 + node_length;
@@ -217,6 +244,49 @@ static char *transpile_node(const Node *node) {
 		memcpy(output + 1, node->value, node_length);
 		output[output_length - 2] = '"';
 		output[output_length - 1] = '\0';
+	} else if(node->type == jsx_attribute_node) {
+		char *attribute_name_transpiled = transpile_node(node->left);
+		long attribute_name_transpiled_length =
+			strlen(attribute_name_transpiled);
+		char *attribute_value_transpiled;
+		long attribute_value_transpiled_length;
+
+		if(node->right) {
+			attribute_value_transpiled = transpile_node(node->right);
+			attribute_value_transpiled_length =
+				strlen(attribute_value_transpiled);
+		} else {
+			attribute_value_transpiled = TRUE_CHUNK;
+			attribute_value_transpiled_length = TRUE_CHUNK_LENGTH;
+		}
+
+		/* identifier + ':' + value + '\0' */
+		output_length =
+			attribute_name_transpiled_length +
+			attribute_value_transpiled_length + 2;
+		output = malloc(output_length);
+		memcpy(
+			output,
+			attribute_name_transpiled,
+			attribute_name_transpiled_length)
+		;
+		output[attribute_name_transpiled_length] = ':';
+		memcpy(
+			output + attribute_name_transpiled_length + 1,
+			attribute_value_transpiled,
+			attribute_value_transpiled_length
+		);
+		output[output_length - 1] = '\0';
+	} else if(
+		node->type == identifier_node ||
+		node->type == jsx_expression_text_node
+	) {
+		long node_length = node->end - node->start;
+		output = malloc(node_length);
+		memcpy(output, node->value, node_length);
+		output[node_length] = '\0';
+	} else if(node->type == jsx_expression_node) {
+		output = transpile_nodes((const Node **)node->children);
 	} else {
 		fprintf(stderr, "Unexpected node type.\n");
 		exit(1);
